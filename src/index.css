@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 215 52% 11%;
+    --foreground: 40 20% 96%;
+    --border: 215 30% 22%;
+    --primary: 38 45% 56%;
+    --radius: 6px;
+  }
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    background-color: hsl(215, 52%, 11%);
+    color: hsl(40, 20%, 96%);
+    font-family: "Inter", sans-serif;
+    font-size: 17px;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+  }
+  h1, h2, h3, h4 {
+    font-family: "Cormorant Garamond", serif;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    font-weight: 600;
+  }
+  ::selection {
+    background: rgba(192, 155, 92, 0.25);
+  }
+}
+
+@layer components {
+  .font-display {
+    font-family: "Cormorant Garamond", serif;
+  }
+  .eyebrow {
+    font-family: "Inter", sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+  }
+}
