@@ -10,6 +10,8 @@
  */
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { validateEmail } from "./_email-validator.js";
+import { insertSubmission } from "./_supabase.js";
 
 const EO_API = "https://emailoctopus.com/api/1.6";
 
@@ -20,8 +22,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { email } = req.body ?? {};
 
-  if (!email || typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (!email || typeof email !== "string") {
     return res.status(400).json({ error: "Invalid email" });
+  }
+
+  // Tier 1 email validation: format + disposable blocklist + MX lookup.
+  // Runs in ~50ms for good domains, ~3s worst case for DNS timeouts.
+  const validation = await validateEmail(email);
+  if (!validation.valid) {
+    const message =
+      validation.reason === "disposable"
+        ? "Please use your real work or personal email, not a disposable address."
+        : validation.reason === "no-mx-records" || validation.reason === "dns-lookup-failed"
+        ? "That email domain doesn't look right. Please double-check and try again."
+        : validation.reason === "kickbox-undeliverable"
+        ? "That email address looks undeliverable. Please double-check and try again."
+        : "Please enter a valid email address.";
+    return res.status(400).json({ error: message });
   }
 
   const apiKey = process.env.EMAILOCTOPUS_API_KEY;
@@ -48,6 +65,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 409 = already subscribed, treat as success
     if (response.ok || (body?.error as Record<string, unknown>)?.code === "MEMBER_EXISTS_WITH_EMAIL_ADDRESS") {
+      // Fire Supabase insert before responding. No-ops if SUPABASE_URL isn't
+      // configured yet. Promise.allSettled ensures serverless doesn't kill
+      // the in-flight insert before the response goes out, but a Supabase
+      // failure never breaks the user-facing flow.
+      const normalisedEmail = email.toLowerCase().trim();
+      await Promise.allSettled([
+        insertSubmission({ source: "calc", email: normalisedEmail }),
+      ]);
       return res.status(200).json({ ok: true });
     }
 

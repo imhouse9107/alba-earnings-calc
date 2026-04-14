@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mux/mux-player-react": "^3.11.7",
+    "disposable-email-domains": "^1.0.62",
     "framer-motion": "^12.35.2",
     "lucide-react": "^0.462.0",
     "react": "^18.3.1",

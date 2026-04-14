@@ -1,6 +1,8 @@
 // Alba Earnings Calculator - Calc Engine
 // All monetary values in GBP unless suffixed USD.
 
+import { getBenchmark, type Role, type Experience } from "./benchmarks";
+
 export const GBP_USD_RATE = 1.27;
 
 // UK income tax + NI approximation (2024/25 rates)
@@ -71,20 +73,24 @@ export function usTakeHome(grossUSD: number): number {
 }
 
 export interface CalcInputs {
+  role: Role;
+  experience: Experience;
   ukBase: number;       // GBP annual base
   ukOTE: number;        // GBP annual OTE
-  usBase: number;       // USD annual base
-  usOTE: number;        // USD annual OTE
 }
 
 export interface CalcResults {
+  // Inputs echoed back
+  role: Role;
+  experience: Experience;
+
   // UK
   ukBase: number;
   ukOTE: number;
   ukBaseTakeHome: number;
   ukOTETakeHome: number;
 
-  // US (in USD)
+  // US (in USD) - DERIVED from benchmarks, not user input
   usBase: number;
   usOTE: number;
 
@@ -106,7 +112,12 @@ export interface CalcResults {
 }
 
 export function compute(inputs: CalcInputs): CalcResults {
-  const { ukBase, ukOTE, usBase, usOTE } = inputs;
+  const { role, experience, ukBase, ukOTE } = inputs;
+
+  // Look up US market benchmark from role + experience matrix
+  const benchmark = getBenchmark(role, experience);
+  const usBase = benchmark.base;
+  const usOTE = benchmark.ote;
 
   const usBaseGBP = Math.round(usBase / GBP_USD_RATE);
   const usOTEGBP = Math.round(usOTE / GBP_USD_RATE);
@@ -129,6 +140,8 @@ export function compute(inputs: CalcInputs): CalcResults {
   const pensionDiff = Math.round(pensionContribution * 47.7);
 
   return {
+    role,
+    experience,
     ukBase,
     ukOTE,
     ukBaseTakeHome,
