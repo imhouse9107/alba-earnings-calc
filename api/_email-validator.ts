@@ -140,8 +140,12 @@ export async function validateEmail(email: string): Promise<EmailValidationResul
     return { valid: false, reason: "disposable" };
   }
 
-  // Check 3: MX lookup (DNS). Fail-open on timeout/lookup error.
-  const mx = await hasMxRecords(domain);
+  // Check 3 + Tier 2: MX lookup and Kickbox run concurrently - independent I/O.
+  const [mx, kickboxResult] = await Promise.all([
+    hasMxRecords(domain),
+    verifyWithKickbox(normalised),
+  ]);
+
   if (!mx.ok && mx.reason === "no-mx-records") {
     return { valid: false, reason: "no-mx-records" };
   }
@@ -150,9 +154,6 @@ export async function validateEmail(email: string): Promise<EmailValidationResul
     console.warn(`[email-validator] DNS transient failure for ${domain}, failing open. Reason: ${mx.reason}`);
   }
 
-  // Tier 2: Kickbox SMTP verification. Silent no-op if no API key configured.
-  // Activates automatically when KICKBOX_API_KEY env var is added.
-  const kickboxResult = await verifyWithKickbox(normalised);
   if (kickboxResult.checked && !kickboxResult.ok) {
     return { valid: false, reason: "kickbox-undeliverable" };
   }

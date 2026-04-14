@@ -15,9 +15,41 @@ import { insertSubmission } from "./_supabase.js";
 
 const EO_API = "https://emailoctopus.com/api/1.6";
 
+// Simple in-memory rate limiter (per function instance, resets on cold start).
+// Limits each IP to 10 subscribe attempts per minute. Protects against EO
+// quota exhaustion and DNS credit burn from unauthenticated callers.
+//
+// Upgrade path for high traffic: replace with Upstash Redis rate limiter:
+//   https://github.com/upstash/ratelimit-js
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX = 10;
+const ipCounts = new Map<string, { n: number; t: number }>();
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const entry = ipCounts.get(ip);
+  if (!entry || now - entry.t > RATE_WINDOW_MS) {
+    ipCounts.set(ip, { n: 1, t: now });
+    return false;
+  }
+  if (entry.n >= RATE_MAX) return true;
+  entry.n++;
+  return false;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  // Rate limit by IP before any I/O
+  const ip =
+    (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ??
+    "unknown";
+  if (isRateLimited(ip)) {
+    return res
+      .status(429)
+      .json({ error: "Too many requests. Please try again in a minute." });
   }
 
   const { email } = req.body ?? {};
@@ -26,9 +58,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: "Invalid email" });
   }
 
+  // Normalise once at entry - used consistently throughout
+  const normalisedEmail = email.trim().toLowerCase();
+
   // Tier 1 email validation: format + disposable blocklist + MX lookup.
   // Runs in ~50ms for good domains, ~3s worst case for DNS timeouts.
-  const validation = await validateEmail(email);
+  const validation = await validateEmail(normalisedEmail);
   if (!validation.valid) {
     const message =
       validation.reason === "disposable"
@@ -50,36 +85,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const response = await fetch(`${EO_API}/lists/${listId}/contacts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        api_key: apiKey,
-        email_address: email.toLowerCase().trim(),
-        status: "SUBSCRIBED",
-        tags: ["calc-tool"],
+    // EO subscription and Supabase logging run concurrently - independent I/O.
+    // Supabase is fire-and-forget; EO result determines the response.
+    const [eoSettled] = await Promise.allSettled([
+      fetch(`${EO_API}/lists/${listId}/contacts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_key: apiKey,
+          email_address: normalisedEmail,
+          status: "SUBSCRIBED",
+          tags: ["calc-tool"],
+        }),
       }),
-    });
+      insertSubmission({ source: "calc", email: normalisedEmail }),
+    ]);
 
-    const body = await response.json() as Record<string, unknown>;
+    if (eoSettled.status === "rejected") {
+      console.error("Subscribe fetch error", eoSettled.reason);
+      return res.status(500).json({ error: "Network error" });
+    }
+
+    const response = eoSettled.value;
+    const body = (await response.json()) as Record<string, unknown>;
 
     // 409 = already subscribed, treat as success
-    if (response.ok || (body?.error as Record<string, unknown>)?.code === "MEMBER_EXISTS_WITH_EMAIL_ADDRESS") {
-      // Fire Supabase insert before responding. No-ops if SUPABASE_URL isn't
-      // configured yet. Promise.allSettled ensures serverless doesn't kill
-      // the in-flight insert before the response goes out, but a Supabase
-      // failure never breaks the user-facing flow.
-      const normalisedEmail = email.toLowerCase().trim();
-      await Promise.allSettled([
-        insertSubmission({ source: "calc", email: normalisedEmail }),
-      ]);
+    if (
+      response.ok ||
+      (body?.error as Record<string, unknown>)?.code ===
+        "MEMBER_EXISTS_WITH_EMAIL_ADDRESS"
+    ) {
       return res.status(200).json({ ok: true });
     }
 
     console.error("EmailOctopus error", body);
     return res.status(500).json({ error: "Subscription failed" });
   } catch (err) {
-    console.error("Subscribe fetch error", err);
+    console.error("Subscribe error", err);
     return res.status(500).json({ error: "Network error" });
   }
 }
