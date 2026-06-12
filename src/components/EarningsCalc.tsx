@@ -54,6 +54,7 @@ const NumberInput = ({
   placeholder,
   prefix,
   hint,
+  error,
 }: {
   label: string;
   value: string;
@@ -61,6 +62,7 @@ const NumberInput = ({
   placeholder: string;
   prefix: string;
   hint?: string;
+  error?: string;
 }) => {
   const id = useId();
   return (
@@ -86,18 +88,23 @@ const NumberInput = ({
           className="w-full rounded-lg pl-8 pr-5 py-4 min-h-[52px] text-white placeholder-white/25 text-[15px] focus:outline-none transition-all"
           style={{
             backgroundColor: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(255,255,255,0.1)",
+            border: `1px solid ${error ? "#f87171" : "rgba(255,255,255,0.1)"}`,
           }}
           onFocus={(e) => {
-            e.currentTarget.style.borderColor = GOLD;
-            e.currentTarget.style.boxShadow = `0 0 0 3px rgba(192,155,92,0.15)`;
+            if (!error) {
+              e.currentTarget.style.borderColor = GOLD;
+              e.currentTarget.style.boxShadow = `0 0 0 3px rgba(192,155,92,0.15)`;
+            }
           }}
           onBlur={(e) => {
-            e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)";
+            e.currentTarget.style.borderColor = error ? "#f87171" : "rgba(255,255,255,0.1)";
             e.currentTarget.style.boxShadow = "none";
           }}
         />
       </div>
+      {error && (
+        <p className="text-[12px] mt-1.5" style={{ color: "#f87171" }}>{error}</p>
+      )}
     </div>
   );
 };
@@ -141,6 +148,13 @@ const FormPhase = ({
   onCalculate: () => void;
 }) => {
   const valid = isValid(inputs);
+
+  const ukBase = parseGBP(inputs.ukBase);
+  const ukOTE = parseGBP(inputs.ukOTE);
+  const oteError =
+    ukOTE > 0 && ukBase > 0 && ukOTE < ukBase
+      ? "OTE must be at least as high as your base (it includes base + commission)"
+      : undefined;
 
   return (
     <div className="w-full max-w-[720px] mx-auto">
@@ -266,6 +280,7 @@ const FormPhase = ({
                 onChange={(v) => onChange("ukOTE", v)}
                 placeholder="55000"
                 hint="Base + realistic commission"
+                error={oteError}
               />
             </div>
           </div>
@@ -273,7 +288,7 @@ const FormPhase = ({
           <button
             onClick={onCalculate}
             disabled={!valid}
-            className="w-full rounded-lg px-8 py-4 min-h-[56px] font-semibold text-[15px] transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed"
+            className="w-full rounded-lg px-8 py-4 min-h-[56px] font-semibold text-[15px] transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed"
             style={{
               backgroundColor: valid ? GOLD : "rgba(255,255,255,0.05)",
               color: valid ? "#0D1B2A" : "rgba(255,255,255,0.4)",
@@ -285,9 +300,17 @@ const FormPhase = ({
             Reveal what you're worth in the US →
           </button>
 
-          {!valid && (inputs.role !== "" || parseGBP(inputs.ukBase) > 0) && (
-            <p className="text-center text-[12px] mt-3" style={{ color: "rgba(255,255,255,0.35)" }}>
-              Pick a role, pick your experience, fill in your UK base and OTE (minimum £18K, OTE at least as high as base).
+          {!valid && (inputs.role !== "" || ukBase > 0) && (
+            <p className="text-center text-[13px] mt-3" style={{ color: "rgba(255,255,255,0.55)" }}>
+              {inputs.role === ""
+                ? "Select your role above to continue."
+                : inputs.experience === ""
+                ? "Select your experience level to continue."
+                : ukBase < 18000 || ukOTE < 18000
+                ? "Enter your base and OTE (minimum £18K each)."
+                : oteError
+                ? "Your OTE should be higher than your base salary."
+                : "Fill in all fields to reveal your US earnings."}
             </p>
           )}
         </div>
